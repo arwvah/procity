@@ -1,15 +1,21 @@
-# PROCITY — Live 3D Linux Process Visualization
+# Linux Process City (PROCity)
 
 A real-time system-monitoring app for Omarchy Linux (Arch + Hyprland): every running
 process is a skyscraper in a neon cyberpunk city. Building **height** = memory (RSS),
 building **color** = CPU usage, all driven by live `psutil` data over a local
 WebSocket. Not a mockup — actual PIDs, actual usage, updating every second.
 
+![Linux Process City running its synthetic demo, with a 3D process skyline and resource HUD](docs/screenshots/city-overview.png)
+
+Screenshots use the application's **synthetic demo mode**. Live mode reads actual local process metrics; the screenshots do not expose the host's running processes.
+
+![Selected process with CPU, memory, thread and command-line details](docs/screenshots/process-details.png)
+
 ![stack](https://img.shields.io/badge/Three.js-Vite-TypeScript-blue) ![backend](https://img.shields.io/badge/FastAPI-psutil-asyncio-green)
 
 ## Features
 
-- **Live 3D city** — one InstancedMesh, one draw call for up to ~1000+ buildings
+- **Live 3D city** — instanced building geometry, with a configurable default limit of 1,000 processes
 - **Process mapping** — stable identity (`pid:create_time`, PID-recycling safe),
   stable slot per process, smooth height/color interpolation, spawn/despawn animations
 - **HUD** — CPU (with per-core bars), RAM, swap, GPU (NVIDIA via pynvml/nvidia-smi
@@ -35,10 +41,56 @@ scripts/    install.sh / run.sh / uninstall.sh
 hyprland/   optional Hyprland window rules
 ```
 
+## How it works
+
+```text
+Linux process metrics (psutil) + optional NVIDIA GPU metrics
+                         |
+                  FastAPI monitor
+                 /api/* and /ws
+                         |
+               TypeScript state updates
+                         |
+           Three.js city + HUD + process panel
+```
+
+The backend samples process metadata and streams snapshots over WebSocket. The frontend maps each process to a stable city slot using its PID and creation time, which avoids treating a recycled PID as the same process. Building height can represent memory, CPU, or thread count; color indicates CPU activity. Filters dim buildings without removing their spatial context.
+
+## Portable manual setup
+
+Requires Python 3.10+ (3.14 used for this validation), Node.js/npm compatible with the included Vite toolchain, and a WebGL-capable browser. Linux is the primary target; NVIDIA monitoring is optional. Omarchy/Hyprland is only needed for the optional desktop integration.
+
+```bash
+git clone https://github.com/arwvah/procity.git
+cd procity
+python3 -m venv backend/.venv
+backend/.venv/bin/python -m pip install -r backend/requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ../backend
+.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8901
+```
+
+Open **http://127.0.0.1:8901**. To serve synthetic data, prefix the final command with `PROCITY_DEMO=1`. The optional installer below also creates a local launcher; manual setup does not change desktop configuration.
+
+## API
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/health` | Version, availability and demo status |
+| `GET /api/snapshot` | System metrics and current process snapshot |
+| `GET /api/processes` | Process list, truncation status and display limit |
+| `GET /api/processes/{pid}?create_time=...` | Process details with optional PID-reuse protection |
+| `WS /ws` | Recurring snapshots at the configured interval |
+
+Keep the service bound to loopback: the local API exposes process metadata and has no authentication. It is a read-only visualization; it does not terminate processes or inspect their memory contents.
+
 ## Install (Omarchy / Arch)
 
 ```bash
-cd "/home/arwah/Projects/Linux Process City"
+git clone https://github.com/arwvah/procity.git
+cd procity
 scripts/install.sh
 ```
 
@@ -80,11 +132,16 @@ dedicated floating/fullscreen window. Nothing is modified automatically.
 ## Tests
 
 ```bash
+backend/.venv/bin/python -m pip install -r backend/requirements-dev.txt
 backend/.venv/bin/python -m pytest backend/tests -q   # backend: 21 tests
 cd frontend && npm test                               # frontend logic: 19 tests
 ```
 
+Validation on October 13, 2026: **21 backend tests and 19 frontend tests passed**, and the production frontend build succeeded. Backend tests currently emit FastAPI/Starlette deprecation warnings.
+
 ## Known limitations
+
+- The server-side `PROCITY_DEMO=1` stream currently retains the LIVE connection badge, and its synthetic memory totals may be inconsistent. The screenshots use the clearly labeled frontend offline fallback demo instead.
 
 - Other users' processes may show limited fields (cmdline/username) without root —
   by design; the app never requires sudo.
